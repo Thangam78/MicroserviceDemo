@@ -15,7 +15,7 @@ stages:
       - job: BuildJob
         displayName: 'Build Microservice'
         pool:
-          vmImage: 'ubuntu-latest'
+          name: Default
         steps:
           - task: UseDotNet@2
             displayName: 'Install .NET SDK'
