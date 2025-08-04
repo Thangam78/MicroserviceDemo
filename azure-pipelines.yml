@@ -1,0 +1,89 @@
+trigger:
+  - main
+
+variables:
+  buildConfiguration: 'Release'
+  dotnetSdkVersion: '8.x'
+  stagingWebAppName: 'microservice-staging-<yourname>'
+  prodWebAppName: 'microservice-prod-<yourname>'
+  azureSubscription: 'AzureServiceConnection'
+
+stages:
+  - stage: Build
+    displayName: 'Build Stage'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Microservice'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Install .NET SDK'
+            inputs:
+              version: '$(dotnetSdkVersion)'
+          - script: dotnet restore
+            displayName: 'Restore dependencies'
+            workingDirectory: 'MicroserviceDemo'
+          - script: dotnet build --configuration $(buildConfiguration) --no-restore
+            displayName: 'Build project'
+            workingDirectory: 'MicroserviceDemo'
+          - script: dotnet test --no-build --configuration $(buildConfiguration)
+            displayName: 'Run unit tests'
+            workingDirectory: 'MicroserviceDemo'
+          - script: dotnet publish --configuration $(buildConfiguration) --no-build --output $(Build.ArtifactStagingDirectory)/publish
+            displayName: 'Publish project'
+            workingDirectory: 'MicroserviceDemo'
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish artifacts'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/publish'
+              artifact: 'drop'
+              publishLocation: 'pipeline'
+
+  - stage: DeployToStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployStaging
+        displayName: 'Deploy to Staging Web App'
+        environment: 'staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: 'drop'
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Staging App Service'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(stagingWebAppName)'
+                    package: '$(Pipeline.Workspace)/drop/*.zip'
+
+  - stage: DeployToProduction
+    displayName: 'Deploy to Production'
+    dependsOn: DeployToStaging
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProduction
+        displayName: 'Deploy to Production Web App'
+        environment: 'production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: 'drop'
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Production App Service'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(prodWebAppName)'
+                    package: '$(Pipeline.Workspace)/drop/*.zip'
